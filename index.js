@@ -35,8 +35,9 @@ const contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, provider);
 app.get("/pending-orders", async (req, res) => {
   try {
     const result = await contract.getAllPendingOrders();
-    const orderIds = result[0];
-    const assetIndexes = result[2];
+    const orderIds = result[0].map(id => Number(id));
+    const assetIndexes = result[2].map(index => Number(index));
+
     res.json({ orderIds, assetIndexes });
   } catch (err) {
     console.error("Error fetching pending orders:", err);
