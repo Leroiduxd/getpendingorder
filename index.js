@@ -45,40 +45,64 @@ const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
 const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
 const contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, wallet);
 
+console.log("🚀 Executor wallet address:", wallet.address);
+
 app.get("/execute-all", async (req, res) => {
   try {
     const result = await contract.getAllPendingOrders();
-    const orderIds = result[0].map(id => Number(id));
-    const assetIndexes = result[2].map(index => Number(index));
+
+    const orderIds = result[0].map((x) => Number(x));
+    const users = result[1];
+    const assetIndexes = result[2].map((x) => Number(x));
 
     const responses = [];
 
     for (let i = 0; i < orderIds.length; i++) {
       const orderId = orderIds[i];
+      const user = users[i];
       const index = assetIndexes[i];
 
-      const proofRes = await fetch("https://proof-production.up.railway.app/get-proof", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ index })
-      });
+      if (user === "0x0000000000000000000000000000000000000000") {
+        console.log(`⚠️ Skipping deleted order #${orderId}`);
+        responses.push({ orderId, status: "skipped", reason: "Order deleted" });
+        continue;
+      }
 
-      const proofData = await proofRes.json();
-      const proof = proofData.proof_bytes;
+      try {
+        console.log(`⏳ Fetching proof for order #${orderId}, index ${index}...`);
+        const proofRes = await fetch("https://proof-production.up.railway.app/get-proof", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ index }),
+        });
 
-      const tx = await contract.executePendingOrder(orderId, proof);
-      await tx.wait();
+        const proofData = await proofRes.json();
+        const proof = proofData.proof_bytes;
 
-      responses.push({ orderId, status: "executed", txHash: tx.hash });
+        if (!proof) throw new Error("No proof returned");
+
+        console.log(`🚀 Executing order #${orderId}...`);
+        const tx = await contract.executePendingOrder(orderId, proof, {
+          gasLimit: 800000 // ajustable si besoin
+        });
+
+        await tx.wait();
+
+        console.log(`✅ Order #${orderId} executed successfully. Tx: ${tx.hash}`);
+        responses.push({ orderId, status: "executed", txHash: tx.hash });
+      } catch (err) {
+        console.error(`❌ Failed to execute order #${orderId}:`, err.reason || err.message);
+        responses.push({ orderId, status: "failed", reason: err.reason || err.message });
+      }
     }
 
     res.json({ executed: responses });
   } catch (err) {
-    console.error("Error executing orders:", err);
-    res.status(500).json({ error: "Failed to execute orders", details: err.message });
+    console.error("🔥 Global error while executing orders:", err.message);
+    res.status(500).json({ error: "Global failure", details: err.message });
   }
 });
 
 app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
+  console.log(`🟢 Server running on port ${port}`);
 });
